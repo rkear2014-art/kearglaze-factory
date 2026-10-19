@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Kearglaze cutting self-test</title><body style="font:18px sans-serif;padding:20px"><div id="app"></div><h1 id="r">running…</h1>
+<script>localStorage.removeItem('x')</script><script src="js/storage.js"></script><script src="js/data.js"></script><script src="js/cutting.js"></script>
+<script>const t=cutSelfTest();const P=paneSelfTest().concat(geoSelfTest(),leadSelfTest());const all=t.ok&&P.every(x=>x.ok);
+document.getElementById('r').textContent=(all?'PASS':'FAIL')+' – '+(1+P.length)+' tests';
+document.body.insertAdjacentHTML('beforeend','<pre id="d">'+[(t.ok?'ok  ':'FAIL')+' frame 660x1200 → grey '+t.grey+' / alu '+t.alu].concat(P.map(x=>(x.ok?'ok  ':'FAIL')+' '+x.got+(x.ok?'':' (expected '+x.exp+')'))).join('\n')+'</pre>');</script>
