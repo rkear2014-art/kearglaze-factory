@@ -3,7 +3,7 @@
 const AI_SET_KEY='kearglaze-ai-settings-v1';
 const AI_DEFAULTS={provider:'gemini',geminiModel:'gemini-3.8-flash',openaiModel:'gpt-4o-mini',maxPx:2000,lowConf:0.75};
 let aiSet=Object.assign({},AI_DEFAULTS,Store.getJSON(AI_SET_KEY,{}));
-const aiKey=p=>Store.getItem('kgsecret-'+p+'-key')||'';
+const aiKey=p=>(Store.getItem('kgsecret-'+p+'-key')||'').replace(/[^\x21-\x7E]/g,'');
 const setAiKey=(p,k)=>k?Store.setItem('kgsecret-'+p+'-key',k.trim()):Store.removeItem('kgsecret-'+p+'-key');
 const maskKey=k=>k?k.slice(0,4)+'••••••••'+k.slice(-4):'(none)';
 
