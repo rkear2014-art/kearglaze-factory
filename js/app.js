@@ -103,6 +103,7 @@ settings(){const last=Store.lastBackup();return `<h1>Settings</h1>
  <div class="card"><h2 style="margin-top:0">📲 App</h2><div class="bar"><button class="btn" id="setInstall" ${window.kgCanInstall?'':'hidden'} onclick="kgInstall()">⬇ Install app</button></div>
  <p style="font-size:14px">On the Android tablet: open the web link in Chrome, then tap the Install button (or Chrome menu ⋮ → “Add to Home screen”). Works offline once installed.</p>
  <p style="font-size:14px">Cutting list settings (deductions, bar lengths, Georgian, lead) are on the <a href="#cut">✂ Cutting</a> page under “Cutting settings”.</p></div>
+ ${aiSettingsCard()}
  <div class="card"><h2 style="margin-top:0">🧪 Demo data</h2><p>Adds clearly marked fake jobs so you can try things out. Delete them afterwards from each job page.</p>
  <div class="bar"><button class="btn sec" id="sDemo">Load demo data</button><button class="btn warn" id="sDelDemo">Remove all DEMO jobs</button></div></div>
  <div class="card"><h2 style="margin-top:0">⚠ Danger zone</h2><button class="btn warn" id="sWipe">Erase all data on this device</button></div>
@@ -125,6 +126,7 @@ edit(no){const j=db.jobs.find(x=>x.no===no);if(!j)return'<h1>Job not found</h1>'
  <datalist id="geopresets">${GEO_PRESETS.map(p=>`<option value="${p}">`).join('')}</datalist><template id="erow">${row({})}</template>
  <p style="font-size:14px">Set Qty to 0 to remove a line. Changing a quantity keeps existing unit IDs and their progress; new units are added at Cut, removed units are taken from the end of the line.</p>
  <div class="bar"><button type="button" class="btn sec" id="eAdd">+ Add line</button><button class="btn go">Save changes</button></div></form>`},
+scansheet(){return scanSheetView()},
 scan(){return `<h1>Scan to advance</h1><div class="card scanbox"><label>Scan a label QR / barcode, or type a unit ID and press Enter
   <input id="scanin" autocomplete="off" autocapitalize="characters" placeholder="e.g. KG1001-01" autofocus></label>
   <div class="bar" style="margin-top:10px"><label style="display:flex;gap:8px;align-items:center;font-size:17px"><input type="checkbox" id="undo" style="width:28px;min-height:28px"> Move back a stage instead</label></div>
@@ -146,7 +148,7 @@ function label(j,u,m){const dd=d=>new Date(d+'T12:00').toLocaleDateString('en-GB
 function route(){const [v,arg]=(location.hash.slice(1)||'board').split('/');const fn=views[v]||views.board;
  app.innerHTML=fn(arg);document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('on',a.dataset.nav===v));
  if(v==='new'){addLine();}
- if(v==='quick'){qRow();qRow();app.querySelector('[name=extJob]').focus()}
+ if(v==='quick'){qRow();qRow();if(typeof pendingReview!=='undefined'&&pendingReview){const r=pendingReview;pendingReview=null;fillReview(r)}else{scanResult=null;app.querySelector('[name=extJob]').focus()}}
  if(v==='scan'){const i=$('#scanin');i.focus();renderRecent()}
  window.scrollTo(0,0)}
 function addLine(){const n=$('#tpl').content.cloneNode(true);$('#lines').appendChild(n);updThick()}
@@ -190,7 +192,7 @@ document.addEventListener('submit',e=>{if(e.target.id==='quickform'){e.preventDe
  const no='KG-'+f.extJob.value.trim().toUpperCase();if(db.jobs.some(j=>j.no===no)&&!confirm(no+' already exists – replace it?'))return;
  db.jobs=db.jobs.filter(j=>j.no!==no);
  const job=sheetJob({no,extJob:f.extJob.value.trim(),customer:f.customer.value.trim(),ref:f.ref.value.trim(),due:f.due.value,glassReq:f.glassReq.value,notes:f.notes.value.trim(),spacer:f.jobbar.value,lines:lines.map(l=>[l.loc,l.wno,l.pos,l.qty,l.w,l.h,l.desc,l.note,l.panel,l.bar,l.geo,l.pat,l.leadPat,l.leadW])});
- db.jobs.push(job);save();toast(`Saved ${job.extJob} – ${job.units.length} items, ${area(job.units).toFixed(2)} m²`);location.hash='#job/'+job.no;return}
+ scanResult=null;db.jobs.push(job);save();toast(`Saved ${job.extJob} – ${job.units.length} items, ${area(job.units).toFixed(2)} m²`);location.hash='#job/'+job.no;return}
  if(e.target.id!=='newjob')return;e.preventDefault();const f=e.target;
  const job={no:'KG'+db.nextNo++,customer:f.customer.value.trim(),due:f.due.value,notes:f.notes.value.trim(),created:new Date().toISOString(),units:[]};
  document.querySelectorAll('#lines .line').forEach((l,li)=>{const g=k=>l.querySelector(`[name=${k}]`).value;const line={w:g('w'),h:g('h'),outer:g('outer'),inner:g('inner'),centre:g('type')==='Triple'?g('centre'):'',spacer:g('spacer'),spacerMm:g('spacerMm'),gas:g('gas')};
