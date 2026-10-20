@@ -1,12 +1,15 @@
 /* Glass sheet optimiser (guillotine) + toughened glass purchase order.
    Annealed panes are nested on stock sheets; toughened panes are bought in cut-to-size. */
 const OPT_KEY='kearglaze-opt-settings-v1';
-const OPT_DEFAULTS={sheets:'Float=3210x2250\nLow-E=3210x2250\nObscure|Digital|Satin|Pattern=2140x1605\n*=3210x2250',trim:10,kerf:0,rotate:true,noRotate:'Obscure|Digital|Satin|Pattern',minRemnant:300,
+const OPT_DEFAULTS={sheets:'Obscure|Digital|Satin|Pattern=1250x2250\nFloat|Low-E=2250x1190,2250x1060,2250x980\n*=2250x1190,2250x1060,2250x980',trim:10,kerf:0,rotate:true,noRotate:'Obscure|Digital|Satin|Pattern',minRemnant:300,
  tSupplier:'Bloomsbury Glass',tAddress:'',tEmail:'',tPhone:'',tLeadDays:3};
 let optSet=Object.assign({},OPT_DEFAULTS,Store.getJSON(OPT_KEY,{}));
+if(!optSet.v2){optSet.sheets=OPT_DEFAULTS.sheets;optSet.tSupplier=optSet.tSupplier||'Bloomsbury Glass';optSet.v2=1;Store.setJSON(OPT_KEY,optSet)}
 const saveOpt=()=>Store.setJSON(OPT_KEY,optSet);
 const isTough=t=>/tough/i.test(t||'');
-function sheetFor(type){for(const line of String(optSet.sheets).split(/\n|;/)){const m=line.match(/^\s*(.+?)\s*=\s*(\d+)\s*[x×]\s*(\d+)/);if(!m)continue;if(m[1]==='*'||new RegExp(m[1],'i').test(type))return {w:+m[2],h:+m[3]}}return {w:3210,h:2250}}
+function sheetsFor(type){for(const line of String(optSet.sheets).split(/\n|;/)){const m=line.match(/^\s*(.+?)\s*=\s*(.+)$/);if(!m)continue;
+  const sz=[...m[2].matchAll(/(\d+)\s*[x×]\s*(\d+)/g)].map(x=>({w:+x[1],h:+x[2]}));if(sz.length&&(m[1].trim()==='*'||new RegExp(m[1],'i').test(type)))return sz}return [{w:2250,h:1190}]}
+const sheetFor=type=>sheetsFor(type)[0];
 function canRotate(type){return !!optSet.rotate&&!(optSet.noRotate&&new RegExp(optSet.noRotate,'i').test(type))}
 
 // ---- guillotine packer ----
@@ -30,17 +33,34 @@ function packOnce(pieces,S,opts,heur,split){const t=opts.trim,k=opts.kerf;const 
   [B,R].forEach(n=>{if(n.w>0&&n.h>0&&f.kids.concat(A.kids).includes(n))b.free.push(n)});
   b.placed.push({...p,x:P.x,y:P.y,pw:w,ph:h,rot})}
  return bins}
-function optimiseType(type,panes){const S=sheetFor(type);const opts={trim:+optSet.trim,kerf:+optSet.kerf,rot:canRotate(type)};
- const sorts={area:(a,b)=>b.w*b.h-a.w*a.h,long:(a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)||b.w*b.h-a.w*a.h,height:(a,b)=>b.h-a.h||b.w-a.w,width:(a,b)=>b.w-a.w||b.h-a.h,perim:(a,b)=>(b.w+b.h)-(a.w+a.h)};
- let best=null,tried=0;
- for(const [sn,sf] of Object.entries(sorts))for(const heur of ['baf','bssf','blsf','bl'])for(const split of ['sas','las','h','v']){tried++;
-  const bins=packOnce(panes.slice().sort(sf),S,opts,heur,split);if(!bins)return {type,S,error:'A pane is larger than the stock sheet',panes};
-  const last=bins[bins.length-1].placed.reduce((a,p)=>a+p.pw*p.ph,0);const rem=bins.reduce((a,b)=>a+Math.max(0,...b.free.map(f=>f.w*f.h)),0);
-  const key=[bins.length,last,-rem];if(!best||key[0]<best.key[0]||(key[0]===best.key[0]&&(key[1]<best.key[1]||(key[1]===best.key[1]&&key[2]<best.key[2]))))best={key,bins,how:`${sn}/${heur}/${split}`}}
- const used=panes.reduce((a,p)=>a+p.w*p.h,0),sheetA=S.w*S.h*best.bins.length;const mr=+optSet.minRemnant;
- const sheets=best.bins.map((b,i)=>{const cuts=[];(function walk(n){if(n.cut)cuts.push(n.cut);n.kids.forEach(walk)})(b.root);
-  const rem=b.free.filter(f=>(f.w>=mr&&f.h>=mr)).sort((a,c)=>c.w*c.h-a.w*a.h);const u=b.placed.reduce((a,p)=>a+p.pw*p.ph,0);return {i:i+1,placed:b.placed,cuts,remnants:rem,yield:u/(S.w*S.h)}});
- return {type,S,opts,sheets,yield:used/sheetA,wasteM2:(sheetA-used)/1e6,usedM2:used/1e6,how:best.how,tried,panes:panes.length}}
+const SORTS={area:(a,b)=>b.w*b.h-a.w*a.h,long:(a,b)=>Math.max(b.w,b.h)-Math.max(a.w,a.h)||b.w*b.h-a.w*a.h,height:(a,b)=>b.h-a.h||b.w-a.w,width:(a,b)=>b.w-a.w||b.h-a.h,perim:(a,b)=>(b.w+b.h)-(a.w+a.h)};
+// best single sheet of size S for the remaining panes (tries all heuristics)
+function bestOneSheet(pieces,S,opts){let best=null;
+ for(const [sn,sf] of Object.entries(SORTS))for(const heur of ['baf','bssf','blsf','bl'])for(const split of ['sas','las']){
+  const fits=pieces.filter(p=>(p.w<=S.w-2*opts.trim&&p.h<=S.h-2*opts.trim)||(opts.rot&&p.h<=S.w-2*opts.trim&&p.w<=S.h-2*opts.trim));if(!fits.length)return null;
+  const bins=packOnce(fits.slice().sort(sf),S,opts,heur,split);if(!bins)continue;const b=bins[0];const area=b.placed.reduce((a,p)=>a+p.pw*p.ph,0);
+  const rem=Math.max(0,...b.free.map(f=>f.w*f.h));if(!best||area>best.area||(area===best.area&&rem>best.rem))best={b,area,rem,how:`${sn}/${heur}/${split}`,all:b.placed.length===pieces.length}}
+ return best}
+function planWith(pieces,sizes,opts,mode){let left=pieces.slice();const sheets=[];let guard=0;
+ while(left.length&&guard++<500){const cands=sizes.map(S=>({S,r:bestOneSheet(left,S,opts)})).filter(c=>c.r);if(!cands.length)return null;
+  const finishing=cands.filter(c=>c.r.all).sort((a,b)=>a.S.w*a.S.h-b.S.w*b.S.h);let pick;
+  if(finishing.length)pick=finishing[0];// downsize the last sheet
+  else if(mode==='yield')pick=cands.sort((a,b)=>b.r.area/(b.S.w*b.S.h)-a.r.area/(a.S.w*a.S.h))[0];
+  else if(mode==='area')pick=cands.sort((a,b)=>b.r.area-a.r.area)[0];
+  else pick=cands.find(c=>c.S===sizes[+mode])||cands[0];
+  const ids=new Set(pick.r.b.placed.map(p=>p.id));left=left.filter(p=>!ids.has(p.id));sheets.push({S:pick.S,b:pick.r.b,how:pick.r.how})}
+ return left.length?null:sheets}
+function optimiseType(type,panes){const sizes=sheetsFor(type);const opts={trim:+optSet.trim,kerf:+optSet.kerf,rot:canRotate(type)};
+ const tooBig=panes.find(p=>!sizes.some(S=>(p.w<=S.w-2*opts.trim&&p.h<=S.h-2*opts.trim)||(opts.rot&&p.h<=S.w-2*opts.trim&&p.w<=S.h-2*opts.trim)));
+ if(tooBig)return {type,S:sizes[0],sizes,error:`Pane ${tooBig.w}×${tooBig.h} (${tooBig.id}) is larger than the stock sheet${sizes.length>1?'s':''}${opts.rot?'':' (no rotation)'}`,panes:panes.length,sheets:[]};
+ let best=null;const modes=['yield','area',...sizes.map((_,i)=>String(i))];
+ for(const m of modes){const sh=planWith(panes,sizes,opts,m);if(!sh)continue;const tot=sh.reduce((a,x)=>a+x.S.w*x.S.h,0);if(!best||tot<best.tot||(tot===best.tot&&sh.length<best.sh.length))best={sh,tot,mode:m}}
+ const used=panes.reduce((a,p)=>a+p.w*p.h,0);const mr=+optSet.minRemnant;
+ const sheets=best.sh.map((x,i)=>{const b=x.b;const cuts=[];(function walk(n){if(n.cut)cuts.push(n.cut);n.kids.forEach(walk)})(b.root);
+  const rem=b.free.filter(f=>f.w>=mr&&f.h>=mr).sort((a,c)=>c.w*c.h-a.w*a.h);const u=b.placed.reduce((a,p)=>a+p.pw*p.ph,0);return {i:i+1,S:x.S,placed:b.placed,cuts,remnants:rem,yield:u/(x.S.w*x.S.h)}});
+ const mix={};sheets.forEach(s=>{const k=s.S.w+'x'+s.S.h;mix[k]=(mix[k]||0)+1});
+ const mixText=sizes.map(S=>S.w+'x'+S.h).filter(k=>mix[k]).map(k=>`${mix[k]} x ${k}`).join(', ');
+ return {type,S:sizes[0],sizes,opts,sheets,mixText,yield:used/best.tot,wasteM2:(best.tot-used)/1e6,usedM2:used/1e6,stockM2:best.tot/1e6,how:best.mode,panes:panes.length}}
 function annealedPanes(jobs){const by={};jobs.forEach(j=>j.units.filter(u=>!u.panel).forEach(u=>panesFor(u,j).forEach(p=>{if(isTough(p.type))return;(by[p.type]=by[p.type]||[]).push({w:p.w,h:p.h,id:u.id+' '+p.pane[0],loc:u.loc?`${u.loc} W${u.wno}`:j.no})})));return by}
 function optimiseJobs(jobs){const by=annealedPanes(jobs);return Object.keys(by).sort().map(t=>optimiseType(t,by[t]))}
 // ---- independent validity checks (tests) ----
@@ -49,17 +69,17 @@ function guillotineOK(rects,reg){if(rects.length<=1)return true;const xs=[...new
  for(const y of ys){if(y<=reg.y||y>=reg.y+reg.h)continue;const T=rects.filter(r=>r.y+r.ph<=y),Bm=rects.filter(r=>r.y>=y);if(T.length+Bm.length===rects.length&&T.length&&Bm.length)return guillotineOK(T,{...reg,h:y-reg.y})&&guillotineOK(Bm,{...reg,y,h:reg.y+reg.h-y})}
  return false}
 function checkPlan(res){const t=+optSet.trim;let placed=0,overlap=false,outside=false,guill=true;
- res.sheets.forEach(s=>{const P=s.placed;placed+=P.length;P.forEach((a,i)=>{if(a.x<t||a.y<t||a.x+a.pw>res.S.w-t||a.y+a.ph>res.S.h-t)outside=true;if(!((a.pw===a.w&&a.ph===a.h)||(a.pw===a.h&&a.ph===a.w)))outside=true;
+ res.sheets.forEach(s=>{const P=s.placed;placed+=P.length;P.forEach((a,i)=>{if(a.x<t||a.y<t||a.x+a.pw>s.S.w-t||a.y+a.ph>s.S.h-t)outside=true;if(!res.opts.rot&&a.rot)outside=true;if(!((a.pw===a.w&&a.ph===a.h)||(a.pw===a.h&&a.ph===a.w)))outside=true;
    for(let j=i+1;j<P.length;j++){const b=P[j];if(a.x<b.x+b.pw&&b.x<a.x+a.pw&&a.y<b.y+b.ph&&b.y<a.y+a.ph)overlap=true}});
-  if(!guillotineOK(P,{x:t,y:t,w:res.S.w-2*t,h:res.S.h-2*t}))guill=false});
+  if(!guillotineOK(P,{x:t,y:t,w:s.S.w-2*t,h:s.S.h-2*t}))guill=false});
  return {allPlaced:placed===res.panes,overlap,outside,guillotine:guill}}
 
 // ---- views ----
 const selJobs=arg=>{if(arg)cutSel=new Set(arg.split(','));if(cutSel===null)cutSel=new Set(db.jobs.filter(j=>j.units.some(u=>u.stage<=1)).map(j=>j.no));return db.jobs.filter(j=>cutSel.has(j.no))};
 const jobChips=()=>`<div class="bar">${db.jobs.map(j=>`<label class="chip ${cutSel.has(j.no)?'on':''}" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-optjob="${j.no}" ${cutSel.has(j.no)?'checked':''} style="width:22px;min-height:22px;margin:0">${esc(j.extJob||j.no)}</label>`).join('')}</div>`;
-function sheetSvg(res,s){const S=res.S,sc=180/S.w,H=S.h*sc;const col=['#cfe8f3','#d9f2d0','#fde7c8','#e6dcf5','#f8d7da','#e0f0ee'];
- return `<svg viewBox="-8 -8 ${180+16} ${H+16}" style="width:100%;max-width:190mm" font-family="Arial">
- <rect x="0" y="0" width="${180}" height="${H}" fill="#f4f4f4" stroke="#000" stroke-width=".4"/>
+function sheetSvg(res,s){const S=s.S,sc=Math.min(180/S.w,230/S.h),Wd=S.w*sc,H=S.h*sc;const col=['#cfe8f3','#d9f2d0','#fde7c8','#e6dcf5','#f8d7da','#e0f0ee'];
+ return `<svg viewBox="-8 -8 ${Wd+16} ${H+16}" style="width:100%;max-width:${Math.max(60,Wd+16)}mm;max-height:240mm" font-family="Arial">
+ <rect x="0" y="0" width="${Wd}" height="${H}" fill="#f4f4f4" stroke="#000" stroke-width=".4"/>
  <rect x="${res.opts.trim*sc}" y="${res.opts.trim*sc}" width="${(S.w-2*res.opts.trim)*sc}" height="${(S.h-2*res.opts.trim)*sc}" fill="none" stroke="#999" stroke-width=".15" stroke-dasharray="1,1"/>
  ${s.remnants.map(r=>`<rect x="${r.x*sc}" y="${r.y*sc}" width="${r.w*sc}" height="${r.h*sc}" fill="url(#hatch)" stroke="#2e7d32" stroke-width=".3"/><text x="${(r.x+r.w/2)*sc}" y="${(r.y+r.h/2)*sc}" font-size="2.4" text-anchor="middle" fill="#2e7d32">REMNANT ${Math.round(r.w)}×${Math.round(r.h)}</text>`).join('')}
  ${s.placed.map((p,i)=>{const fs=Math.min(3.2,p.pw*sc/9,p.ph*sc/3.5);return `<rect x="${p.x*sc}" y="${p.y*sc}" width="${p.pw*sc}" height="${p.ph*sc}" fill="${col[i%col.length]}" stroke="#000" stroke-width=".3"/>
@@ -67,11 +87,11 @@ function sheetSvg(res,s){const S=res.S,sc=180/S.w,H=S.h*sc;const col=['#cfe8f3',
   <text x="${(p.x+p.pw/2)*sc}" y="${(p.y+p.ph/2)*sc+fs*0.5}" font-size="${fs*0.75}" text-anchor="middle">${esc(p.id)}</text><text x="${(p.x+p.pw/2)*sc}" y="${(p.y+p.ph/2)*sc+fs*1.4}" font-size="${fs*0.7}" text-anchor="middle">${esc(p.loc)}</text>`}).join('')}
  ${s.cuts.map((c,i)=>{const x1=c.x*sc,y1=c.y*sc,x2=c.dir==='across'?(c.x+c.len)*sc:x1,y2=c.dir==='across'?y1:(c.y+c.len)*sc;return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#c62828" stroke-width=".35"/><circle cx="${x1}" cy="${y1}" r="2" fill="#c62828"/><text x="${x1}" y="${y1+0.9}" font-size="2.2" fill="#fff" text-anchor="middle" font-weight="bold">${i+1}</text>`}).join('')}
  <defs><pattern id="hatch" width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="2" stroke="#9ccc9c" stroke-width=".5"/></pattern></defs>
- <text x="90" y="-2.5" font-size="3" text-anchor="middle">${S.w} mm (top edge)</text><text x="-3" y="${H/2}" font-size="3" text-anchor="middle" transform="rotate(-90 -3 ${H/2})">${S.h} mm</text></svg>`}
+ <text x="${Wd/2}" y="-2.5" font-size="3" text-anchor="middle">${S.w} mm (top edge)</text><text x="-3" y="${H/2}" font-size="3" text-anchor="middle" transform="rotate(-90 -3 ${H/2})">${S.h} mm</text></svg>`}
 function sheetsView(arg){const jobs=selJobs(arg);const R=optimiseJobs(jobs);const O=optSet;const tot=R.reduce((a,r)=>a+(r.sheets?r.sheets.length:0),0);
  const num=(k,l)=>`<div><label>${l}<input type="number" data-opt="${k}" value="${esc(O[k])}"></label></div>`;
- const summary=R.map(r=>r.error?`<tr><td>${esc(r.type)}</td><td colspan=6 style="color:#c62828">${r.error}</td></tr>`:`<tr><td><b>${esc(r.type)}</b></td><td>${r.S.w}×${r.S.h}</td><td>${r.panes}</td><td class="big">${r.sheets.length}</td><td class="big">${(r.yield*100).toFixed(1)}%</td><td>${r.wasteM2.toFixed(2)} m²</td><td>${r.opts.rot?'yes':'<b>no</b> (pattern one way)'}</td></tr>`).join('');
- const pages=R.filter(r=>!r.error).flatMap(r=>r.sheets.map(s=>`<div class="sheetplan"><div class="cuthead">Kearglaze – Sheet cutting plan · <b>${esc(r.type)}</b> · sheet ${s.i} of ${r.sheets.length} (${r.S.w}×${r.S.h}) · yield ${(s.yield*100).toFixed(1)}% · ${jobs.map(j=>esc(j.extJob||j.no)).join(', ')}</div>
+ const summary=R.map(r=>r.error?`<tr><td>${esc(r.type)}</td><td colspan=7 style="color:#c62828">${r.error}</td></tr>`:`<tr><td><b>${esc(r.type)}</b></td><td><b>${r.mixText}</b></td><td>${r.panes}</td><td class="big">${r.sheets.length}</td><td class="big">${(r.yield*100).toFixed(1)}%</td><td>${r.wasteM2.toFixed(2)} m²</td><td>${r.sheets.flatMap(s=>s.remnants.map(f=>Math.round(f.w)+'×'+Math.round(f.h))).join(', ')||'–'}</td><td>${r.opts.rot?'yes':'<b>no</b> (pattern one way)'}</td></tr>`).join('');
+ const pages=R.filter(r=>!r.error).flatMap(r=>r.sheets.map(s=>`<div class="sheetplan"><div class="cuthead">Kearglaze – Sheet cutting plan · <b>${esc(r.type)}</b> · sheet ${s.i} of ${r.sheets.length} (<b>${s.S.w}×${s.S.h}</b>) · yield ${(s.yield*100).toFixed(1)}% · ${jobs.map(j=>esc(j.extJob||j.no)).join(', ')}</div>
   ${/low-?e/i.test(r.type)?'<div class="note">⚠ LOW-E: coated side UP on the table · edge-delete the coating around each pane before assembly.</div>':''}
   ${!r.opts.rot&&/obsc|digital|satin|pattern/i.test(r.type)?'<div class="note">Patterned glass: no rotation – keep the pattern running the same way on every pane.</div>':''}
   <div class="planrow"><div>${sheetSvg(r,s)}</div><div><table class="cut"><tr><th>#</th><th>Cut (score edge to edge)</th></tr>${s.cuts.map((c,i)=>`<tr><td><b>${i+1}</b></td><td>${c.dir==='across'?'ACROSS':'DOWN'} at ${c.dir==='across'?'y':'x'} = <b>${Math.round(c.at)}</b> · length ${Math.round(c.len)}</td></tr>`).join('')}</table>
@@ -80,12 +100,12 @@ function sheetsView(arg){const jobs=selJobs(arg);const R=optimiseJobs(jobs);cons
   ${s.remnants.length?`<p><b>Remnants to keep:</b> ${s.remnants.map(f=>Math.round(f.w)+'×'+Math.round(f.h)).join(', ')}</p>`:''}</div></div></div>`)).join('');
  return `<h1>▦ Sheet cutting plans</h1><div class="card no-print"><b>Jobs:</b>${jobChips()}
  <details><summary style="font-weight:700;cursor:pointer;padding:8px 0">⚙ Optimiser settings</summary><div class="grid">
- <div style="grid-column:1/-1"><label>Stock sheet sizes (one per line: glass type match = W x H mm; * = anything else)<textarea data-opt="sheets" rows="4">${esc(O.sheets)}</textarea></label></div>
+ <div style="grid-column:1/-1"><label>Stock sheet sizes – one line per glass type: match = W x H[, W x H …] (several sizes = optimiser picks the best mix; * = anything else)<textarea data-opt="sheets" rows="4">${esc(O.sheets)}</textarea></label></div>
  ${num('trim','Edge trim each edge (mm)')}${num('kerf','Cut gap / kerf (mm)')}${num('minRemnant','Keep remnants at least (mm square)')}
  <div><label>Allow rotation<select data-opt="rotate"><option value="1" ${O.rotate?'selected':''}>Yes</option><option value="" ${O.rotate?'':'selected'}>No</option></select></label></div>
  <div><label>Never rotate types matching<input data-opt="noRotate" value="${esc(O.noRotate)}"></label></div></div></details>
  <div class="bar"><button class="btn" id="optPrint">🖨 Print A4 sheet plans</button><a class="btn sec" href="#tough">🛒 Toughened order</a><a class="btn sec" href="#cut">✂ Cutting lists</a></div></div>
- <div class="card"><h2 style="margin-top:0">Summary – ${tot} sheet${tot===1?'':'s'} · toughened panes are excluded (ordered cut-to-size)</h2><table class="cut"><tr><th>Glass</th><th>Stock</th><th>Panes</th><th>Sheets</th><th>Yield</th><th>Waste</th><th>Rotation</th></tr>${summary||'<tr><td colspan=7>No annealed panes</td></tr>'}</table></div>${pages}`}
+ <div class="card"><h2 style="margin-top:0">Summary – ${tot} sheet${tot===1?'':'s'} · toughened panes are excluded (ordered cut-to-size)</h2><table class="cut"><tr><th>Glass</th><th>Stock sheets used</th><th>Panes</th><th>Sheets</th><th>Yield</th><th>Waste</th><th>Remnants (≥ min)</th><th>Rotation</th></tr>${summary||'<tr><td colspan=8>No annealed panes</td></tr>'}</table></div>${pages}`}
 
 // ---- toughened order ----
 const TO_KEY='kearglaze-tough-orders';
@@ -137,9 +157,9 @@ document.addEventListener('click',e=>{const t=e.target;
 function optSelfTest(){const save={...optSet};optSet={...OPT_DEFAULTS};const out=[];const T=(n,ok,got)=>out.push({ok,got:'OPT '+n+': '+got,exp:'valid'});
  let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
  [['random 60 float',60,'4mm Float'],['random 25 obscure (no rotate)',25,'4mm Digital Obscure'],['random 120 low-E',120,'4mm Low-E']].forEach(([n,c,type])=>{const P=[];for(let i=0;i<c;i++)P.push({w:200+Math.round(rnd()*1200),h:200+Math.round(rnd()*1400),id:'T'+i,loc:''});
-  const r=optimiseType(type,type.includes('Obscure')?P.map(p=>({...p,w:Math.min(p.w,1500),h:Math.min(p.h,1100)})):P);const c2=checkPlan(r);
-  T(n,c2.allPlaced&&!c2.overlap&&!c2.outside&&c2.guillotine,`${r.sheets.length} sheets, yield ${(r.yield*100).toFixed(1)}%, allPlaced ${c2.allPlaced}, overlap ${c2.overlap}, outside ${c2.outside}, guillotine ${c2.guillotine}`)});
- const big=optimiseType('4mm Float',[{w:4000,h:500,id:'X',loc:''}]);T('oversize pane reported',!!big.error,big.error||'no error');
- const nr=optimiseType('4mm Digital Obscure',[{w:1500,h:1000,id:'R',loc:''},{w:1500,h:500,id:'R2',loc:''}]);T('no-rotate obscure respects grain',!!nr.error||nr.sheets[0].placed.every(p=>!p.rot),nr.error||'not rotated');
- optSet.kerf=4;const k=optimiseType('4mm Float',Array.from({length:30},(_,i)=>({w:500+i*10,h:400+i*7,id:'K'+i,loc:''})));const ck=checkPlan(k);T('kerf 4mm still valid',ck.allPlaced&&!ck.overlap&&!ck.outside&&ck.guillotine,`${k.sheets.length} sheets`);
+  const r=optimiseType(type,type.includes('Obscure')?P.map(p=>({...p,w:Math.min(p.w,1200),h:Math.min(p.h,2200)})):P.map(p=>({...p,w:Math.min(p.w,2200),h:Math.min(p.h,1150)})));const c2=checkPlan(r);
+  T(n,c2.allPlaced&&!c2.overlap&&!c2.outside&&c2.guillotine,`${r.mixText}, yield ${(r.yield*100).toFixed(1)}%, allPlaced ${c2.allPlaced}, overlap ${c2.overlap}, outside ${c2.outside}, guillotine ${c2.guillotine}`)});
+ const big=optimiseType('4mm Float',[{w:2400,h:500,id:'X',loc:''}]);T('oversize pane reported',!!big.error,big.error||'no error');
+ const nr=optimiseType('4mm Digital Obscure',[{w:600,h:1500,id:'R',loc:''},{w:1000,h:500,id:'R2',loc:''}]);T('no-rotate obscure respects grain',!!nr.error||nr.sheets[0].placed.every(p=>!p.rot),nr.error||'not rotated');
+ optSet.kerf=4;const k=optimiseType('4mm Float',Array.from({length:30},(_,i)=>({w:500+i*10,h:400+i*7,id:'K'+i,loc:''})));T('downsized last sheet / mix',/x 2250x/.test(k.mixText),k.mixText);const ck=checkPlan(k);T('kerf 4mm still valid',ck.allPlaced&&!ck.overlap&&!ck.outside&&ck.guillotine,`${k.mixText}`);
  optSet=save;return out}
