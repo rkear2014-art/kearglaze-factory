@@ -79,7 +79,10 @@ body{padding-bottom:env(safe-area-inset-bottom)}
  .board{grid-template-columns:repeat(4,minmax(170px,1fr));overflow-x:visible}.grid{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}}
 .lowconf{background:#fff59d!important;border-color:#f9a825!important}tr.hl td:first-child{background:#ffd6e7}
 .scancheck{padding:12px 14px;border-radius:10px;margin:10px 0;font-size:16px}.scancheck.ok{background:#e6f4e7;border:2px solid #2e7d32}.scancheck.bad{background:#fdeaea;border:2px solid #c62828}
+.sheetplan{background:#fff;border-radius:12px;padding:12px;margin-bottom:12px}.planrow{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:12px;align-items:start}
+@media (max-width:1000px){.planrow{grid-template-columns:1fr}}
 @media print{
+ body.print-sheets .sheetplan{break-after:page;page-break-after:always;padding:0}body.print-sheets .sheetplan:last-child{break-after:auto}body.print-sheets .planrow{grid-template-columns:1fr}body.print-sheets .card:not(.toughpo){display:none}
  body.print-lead .leadsheet{break-after:page;page-break-after:always;padding:0;margin:0}body.print-lead .leadsheet:last-child{break-after:auto}body.print-lead .leadgrid{grid-template-columns:auto 1fr}
  body.print-cut .cutsheet{padding:0}body.print-cut .pb{break-before:page;page-break-before:always}body.print-cut .bar-vis span{-webkit-print-color-adjust:exact;print-color-adjust:exact}body.print-cut{font-size:12px}body.print-cut .cutgroup{break-inside:auto}body.print-cut .cutgroup h2{break-after:avoid}body.print-cut .bar-vis{width:40%}
  .no-print,.top,footer,.toast{display:none!important}body{background:#fff}main{padding:0;margin:0;max-width:none}
