@@ -1,5 +1,5 @@
 // Kearglaze Factory service worker – cache-first, versioned
-const CACHE='kg-v1-202610212025';
+const CACHE='kg-v1-202610212108';
 const ASSETS=[
   "./",
   "css/app.css",
