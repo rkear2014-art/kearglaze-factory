@@ -51,9 +51,14 @@ function checkTotals(lines,totals){const items=lines.reduce((a,l)=>a+(+l.qty||0)
 
 // ---------- AI calls ----------
 async function callGemini(parts){const k=aiKey('gemini');if(!k)throw new Error('No Gemini key – add one in ⚙ Settings → AI job sheet reading');
- const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(aiSet.geminiModel)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':k},
-  body:JSON.stringify({contents:[{role:'user',parts:[{text:SHEET_PROMPT},...parts]}],generationConfig:{temperature:0,responseMimeType:'application/json',responseSchema:SHEET_SCHEMA}})});
- const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error('Gemini: '+((j.error&&j.error.message)||r.status));return j}
+ const models=[...new Set([aiSet.geminiModel,'gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.0-flash'])];let last='';
+ const body=JSON.stringify({contents:[{role:'user',parts:[{text:SHEET_PROMPT},...parts]}],generationConfig:{temperature:0,responseMimeType:'application/json',responseSchema:SHEET_SCHEMA}});
+ for(const m of models){for(let a=0;a<3;a++){
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(m)}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':k},body});
+  const j=await r.json().catch(()=>({}));if(r.ok)return j;last=(j.error&&j.error.message)||r.status;
+  if([429,500,503].includes(r.status)){if(a<2){await new Promise(z=>setTimeout(z,2000*(a+1)));continue}break}
+  if(r.status===404)break;throw new Error('Gemini: '+last)}}
+ throw new Error('Gemini busy on all models, try again in a few minutes ('+last+')')}
 async function callOpenAI(images){const k=aiKey('openai');if(!k)throw new Error('No OpenAI key – add one in ⚙ Settings → AI job sheet reading');
  const r=await fetch('https://api.openai.com/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+k},
   body:JSON.stringify({model:aiSet.openaiModel,temperature:0,response_format:{type:'json_object'},messages:[{role:'system',content:SHEET_PROMPT+'\nJSON shape: '+JSON.stringify(SHEET_SCHEMA)},
